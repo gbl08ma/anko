@@ -138,3 +138,9 @@ type GoroutineStmt struct {
 	StmtImpl
 	Expr Expr
 }
+
+// DeferStmt provide statement of defer.
+type DeferStmt struct {
+	StmtImpl
+	Expr Expr
+}

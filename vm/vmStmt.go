@@ -22,6 +22,17 @@ func Run(stmts []ast.Stmt, env *Env) (interface{}, error) {
 // run executes statements in the specified environment.
 func run(stmts []ast.Stmt, env *Env) (reflect.Value, error) {
 	rv := nilValue
+	defer func() {
+		for i := len(env.defers) - 1; i >= 0; i-- {
+			cf := env.defers[i]
+			if cf.CallSlice {
+				cf.Func.CallSlice(cf.Args)
+			} else {
+				cf.Func.Call(cf.Args)
+			}
+		}
+	}()
+
 	var err error
 	for _, stmt := range stmts {
 		switch stmt.(type) {
@@ -448,6 +459,48 @@ func runSingleStmt(stmt ast.Stmt, env *Env) (reflect.Value, error) {
 		return rv, nil
 	case *ast.GoroutineStmt:
 		return invokeExpr(stmt.Expr, env)
+	case *ast.DeferStmt:
+		switch t := stmt.Expr.(type) {
+		case *ast.AnonCallExpr:
+			f, err := invokeExpr(t.Expr, env)
+			if err != nil {
+				return nilValue, newError(stmt, err)
+			}
+			fType := f.Type()
+			callExpr := &ast.CallExpr{Func: f, SubExprs: t.SubExprs, VarArg: t.VarArg}
+			args, useCallSlice, err := makeCallArgs(fType, true, callExpr, env)
+			if err != nil {
+				return nilValue, newError(stmt, err)
+			}
+			env.defers = append(env.defers, capturedFunc{
+				Func:      f,
+				Args:      args,
+				CallSlice: useCallSlice,
+			})
+		case *ast.CallExpr:
+			var err error
+			f := t.Func
+			if !f.IsValid() {
+				f, err = env.get(t.Name)
+				if err != nil {
+					return nilValue, newError(stmt, err)
+				}
+			}
+			fType := f.Type()
+			isRunVmFunction := checkIfRunVmFunction(fType)
+			args, useCallSlice, err := makeCallArgs(fType, isRunVmFunction, t, env)
+			if err != nil {
+				return nilValue, newError(stmt, err)
+			}
+			env.defers = append(env.defers, capturedFunc{
+				Func:      f,
+				Args:      args,
+				CallSlice: useCallSlice,
+			})
+		default:
+			return invokeExpr(stmt.Expr, env)
+		}
+		return nilValue, nil
 	default:
 		return nilValue, newStringError(stmt, "unknown statement")
 	}

@@ -62,6 +62,7 @@ var opName = map[string]int{
 	"case":     CASE,
 	"default":  DEFAULT,
 	"go":       GO,
+	"defer":    DEFER,
 	"chan":     CHAN,
 	"make":     MAKE,
 	"type":     TYPE,

@@ -15,12 +15,19 @@ type EnvResolver interface {
 	Type(string) (reflect.Type, error)
 }
 
+type capturedFunc struct {
+	Func      reflect.Value
+	Args      []reflect.Value
+	CallSlice bool
+}
+
 // Env provides interface to run VM. This mean function scope and blocked-scope.
 // If stack goes to blocked-scope, it will make new Env.
 type Env struct {
 	name      string
 	env       map[string]reflect.Value
 	typ       map[string]reflect.Type
+	defers    []capturedFunc
 	parent    *Env
 	interrupt *bool
 	external  EnvResolver

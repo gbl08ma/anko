@@ -104,6 +104,7 @@ type CallExpr struct {
 	SubExprs []Expr
 	VarArg   bool
 	Go       bool
+	Defer    bool
 }
 
 // AnonCallExpr provide anonymous calling expression. ex: func(){}().
@@ -113,6 +114,7 @@ type AnonCallExpr struct {
 	SubExprs []Expr
 	VarArg   bool
 	Go       bool
+	Defer    bool
 }
 
 // MemberExpr provide expression to refer member.
