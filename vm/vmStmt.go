@@ -22,7 +22,6 @@ func Run(stmts []ast.Stmt, env *Env) (interface{}, error) {
 // run executes statements in the specified environment.
 func run(stmts []ast.Stmt, env *Env) (reflect.Value, error) {
 	rv := nilValue
-
 	var err error
 	for _, stmt := range stmts {
 		switch stmt.(type) {
