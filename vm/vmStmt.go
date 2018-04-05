@@ -22,16 +22,6 @@ func Run(stmts []ast.Stmt, env *Env) (interface{}, error) {
 // run executes statements in the specified environment.
 func run(stmts []ast.Stmt, env *Env) (reflect.Value, error) {
 	rv := nilValue
-	defer func() {
-		for i := len(env.defers) - 1; i >= 0; i-- {
-			cf := env.defers[i]
-			if cf.CallSlice {
-				cf.Func.CallSlice(cf.Args)
-			} else {
-				cf.Func.Call(cf.Args)
-			}
-		}
-	}()
 
 	var err error
 	for _, stmt := range stmts {
