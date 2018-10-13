@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"unicode"
 
-	"github.com/mattn/anko/ast"
+	"github.com/gbl08ma/anko/ast"
 )
 
 const (

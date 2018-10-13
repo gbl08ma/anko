@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mattn/anko/vm"
+	"github.com/gbl08ma/anko/vm"
 )
 
 func ExampleInterrupt() {

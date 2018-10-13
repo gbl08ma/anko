@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mattn/anko/internal/testlib"
+	"github.com/gbl08ma/anko/internal/testlib"
 )
 
 func TestReturns(t *testing.T) {

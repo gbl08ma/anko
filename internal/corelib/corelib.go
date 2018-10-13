@@ -3,7 +3,7 @@ package corelib
 import (
 	"reflect"
 
-	"github.com/mattn/anko/ast"
+	"github.com/gbl08ma/anko/ast"
 )
 
 // Env is an interface representing vm.Env.

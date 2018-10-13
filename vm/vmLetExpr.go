@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/mattn/anko/ast"
+	"github.com/gbl08ma/anko/ast"
 )
 
 func invokeLetExpr(expr ast.Expr, rv reflect.Value, env *Env) (reflect.Value, error) {
@@ -56,8 +56,8 @@ func invokeLetExpr(expr ast.Expr, rv reflect.Value, env *Env) (reflect.Value, er
 				return nilValue, newStringError(expr, "struct member '"+lhs.Name+"' cannot be assigned")
 			}
 
-			if v.Type().Kind() == reflect.Interface && rv.Type().ConvertibleTo(v.Type()) {
-				v.Set(rv)
+			if rv.Type().ConvertibleTo(v.Type()) {
+				v.Set(rv.Convert(v.Type()))
 				return v, nil
 			}
 

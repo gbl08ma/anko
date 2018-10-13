@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/mattn/anko/internal/testlib"
-	"github.com/mattn/anko/parser"
+	"github.com/gbl08ma/anko/internal/testlib"
+	"github.com/gbl08ma/anko/parser"
 )
 
 var (

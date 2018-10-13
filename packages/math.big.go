@@ -13,7 +13,7 @@ func init() {
 		"Jacobi":       big.Jacobi,
 		"MaxBase":      big.MaxBase,
 		"MaxExp":       big.MaxExp,
-		// TODO: https://github.com/mattn/anko/issues/49
+		// TODO: https://github.com/gbl08ma/anko/issues/49
 		// "MaxPrec":       big.MaxPrec,
 		"MinExp":        big.MinExp,
 		"NewFloat":      big.NewFloat,

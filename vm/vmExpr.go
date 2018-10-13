@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mattn/anko/ast"
+	"github.com/gbl08ma/anko/ast"
 )
 
 // invokeExpr evaluates one expression.
@@ -803,7 +803,7 @@ func invokeExpr(expr ast.Expr, env *Env) (reflect.Value, error) {
 		}
 
 		for i := 0; i < listExpr.Len(); i++ {
-			// todo: https://github.com/mattn/anko/issues/192
+			// todo: https://github.com/gbl08ma/anko/issues/192
 			if equal(itemExpr, listExpr.Index(i)) {
 				return trueValue, nil
 			}

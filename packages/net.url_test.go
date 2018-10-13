@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/mattn/anko/vm"
+	"github.com/gbl08ma/anko/vm"
 )
 
 func TestURL(t *testing.T) {
