@@ -4,6 +4,9 @@ package parser
 import (
 	"errors"
 	"fmt"
+	"reflect"
+	"strconv"
+	"strings"
 	"unicode"
 
 	"github.com/gbl08ma/anko/ast"
@@ -67,7 +70,15 @@ var opName = map[string]int{
 	"type":     TYPE,
 	"len":      LEN,
 	"delete":   DELETE,
+	"close":    CLOSE,
 }
+
+var (
+	nilValue   = reflect.New(reflect.TypeOf((*interface{})(nil)).Elem()).Elem()
+	trueValue  = reflect.ValueOf(true)
+	falseValue = reflect.ValueOf(false)
+	oneLiteral = &ast.LiteralExpr{Literal: reflect.ValueOf(int64(1))}
+)
 
 // Init resets code to scan.
 func (s *Scanner) Init(src string) {
@@ -507,11 +518,11 @@ eos:
 
 // Lexer provides interface to parse codes.
 type Lexer struct {
-	s     *Scanner
-	lit   string
-	pos   ast.Position
-	e     error
-	stmts []ast.Stmt
+	s    *Scanner
+	lit  string
+	pos  ast.Position
+	e    error
+	stmt ast.Stmt
 }
 
 // Lex scans the token and literals.
@@ -533,12 +544,12 @@ func (l *Lexer) Error(msg string) {
 }
 
 // Parse provides way to parse the code using Scanner.
-func Parse(s *Scanner) ([]ast.Stmt, error) {
+func Parse(s *Scanner) (ast.Stmt, error) {
 	l := Lexer{s: s}
 	if yyParse(&l) != 0 {
 		return nil, l.e
 	}
-	return l.stmts, l.e
+	return l.stmt, l.e
 }
 
 // EnableErrorVerbose enabled verbose errors from the parser
@@ -547,9 +558,34 @@ func EnableErrorVerbose() {
 }
 
 // ParseSrc provides way to parse the code from source.
-func ParseSrc(src string) ([]ast.Stmt, error) {
+func ParseSrc(src string) (ast.Stmt, error) {
 	scanner := &Scanner{
 		src: []rune(src),
 	}
 	return Parse(scanner)
+}
+
+func toNumber(numString string) (reflect.Value, error) {
+	if strings.Contains(numString, ".") || strings.Contains(numString, "e") {
+		v, err := strconv.ParseFloat(numString, 64)
+		if err != nil {
+			return nilValue, err
+		}
+		return reflect.ValueOf(float64(v)), nil
+	}
+	var i int64
+	var err error
+	if strings.HasPrefix(numString, "0x") {
+		i, err = strconv.ParseInt(numString[2:], 16, 64)
+	} else {
+		i, err = strconv.ParseInt(numString, 10, 64)
+	}
+	if err != nil {
+		return nilValue, err
+	}
+	return reflect.ValueOf(i), nil
+}
+
+func stringToValue(aString string) reflect.Value {
+	return reflect.ValueOf(aString)
 }

@@ -1,6 +1,7 @@
 package vm_test
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sync"
@@ -9,7 +10,7 @@ import (
 	"github.com/gbl08ma/anko/vm"
 )
 
-func ExampleInterrupt() {
+func ExampleEnv_ExecuteContext() {
 	var waitGroup sync.WaitGroup
 	waitGroup.Add(1)
 	waitChan := make(chan struct{}, 1)
@@ -31,19 +32,20 @@ func ExampleInterrupt() {
 for i = 0; i < 10000; i++ {
 	sleep()
 }
-# Should interrupt before printing the next line
+# the context should cancel before printing the next line
 println("this line should not be printed")
 `
 
+	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		close(waitChan)
-		v, err := env.Execute(script)
+		v, err := env.ExecuteContext(ctx, script)
 		fmt.Println(v, err)
 		waitGroup.Done()
 	}()
 
 	<-waitChan
-	vm.Interrupt(env)
+	cancel()
 
 	waitGroup.Wait()
 

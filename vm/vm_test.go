@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -9,9 +10,12 @@ import (
 	"testing"
 	"time"
 
+	// "net/http"
+	// _ "net/http/pprof"
+
+	"github.com/gbl08ma/anko/ast"
 	"github.com/gbl08ma/anko/internal/corelib"
 	"github.com/gbl08ma/anko/internal/testlib"
-	"github.com/gbl08ma/anko/parser"
 )
 
 var (
@@ -44,6 +48,8 @@ func init() {
 	corelib.NewEnv = func() corelib.Env {
 		return NewEnv()
 	}
+
+	// go http.ListenAndServe(":6060", nil)
 }
 
 func TestNumbers(t *testing.T) {
@@ -57,9 +63,9 @@ func TestNumbers(t *testing.T) {
 1
 `, RunOutput: int64(1)},
 
-		{Script: `1..1`, RunError: fmt.Errorf(`strconv.ParseFloat: parsing "1..1": invalid syntax`)},
+		{Script: `1..1`, ParseError: fmt.Errorf("invalid number: 1..1")},
 		{Script: `0x1g`, ParseError: fmt.Errorf("syntax error")},
-		{Script: `9223372036854775808`, RunError: fmt.Errorf(`strconv.ParseInt: parsing "9223372036854775808": value out of range`)},
+		{Script: `9223372036854775808`, ParseError: fmt.Errorf("invalid number: 9223372036854775808")},
 
 		{Script: `1`, RunOutput: int64(1)},
 		{Script: `-1`, RunOutput: int64(-1)},
@@ -73,8 +79,8 @@ func TestNumbers(t *testing.T) {
 		{Script: `-1e-1`, RunOutput: float64(-0.1)},
 		{Script: `0x1`, RunOutput: int64(1)},
 		{Script: `0xc`, RunOutput: int64(12)},
-		// TOFIX:
-		{Script: `0xe`, RunError: fmt.Errorf(`strconv.ParseFloat: parsing "0xe": invalid syntax`)},
+		// TOFIX: this should work but does not
+		{Script: `0xe`, ParseError: fmt.Errorf("invalid number: 0xe")},
 		{Script: `0xf`, RunOutput: int64(15)},
 		{Script: `-0x1`, RunOutput: int64(-1)},
 		{Script: `-0xc`, RunOutput: int64(-12)},
@@ -412,13 +418,19 @@ func TestModule(t *testing.T) {
 	tests := []testlib.Test{
 		{Script: `module a.b { }`, ParseError: fmt.Errorf("syntax error")},
 		{Script: `module a { 1++ }`, RunError: fmt.Errorf("invalid operation")},
-		{Script: `module a { }; a.b`, RunError: fmt.Errorf("invalid operation 'b'")},
+		{Script: `module a { }; a.b`, RunError: fmt.Errorf("undefined symbol 'b'")},
+
+		{Script: `module a { b = 1 }`, RunOutput: nil},
 
 		{Script: `module a { b = nil }; a.b`, RunOutput: nil},
 		{Script: `module a { b = true }; a.b`, RunOutput: true},
 		{Script: `module a { b = 1 }; a.b`, RunOutput: int64(1)},
-		{Script: `module a { b = 1.1 }; a.b`, RunOutput: float64(1.1)},
+		{Script: `module a { b = 1.5 }; a.b`, RunOutput: float64(1.5)},
 		{Script: `module a { b = "a" }; a.b`, RunOutput: "a"},
+		{Script: `module a { func b() { return "b"} }; a.b()`, RunOutput: "b"},
+
+		{Script: `module a { _b = "b"; func c() { return _b} }`, RunOutput: nil},
+		{Script: `module a { _b = "b"; func c() { return _b} }; a.c()`, RunOutput: "b"},
 	}
 	testlib.Run(t, tests, nil)
 }
@@ -494,45 +506,104 @@ func TestMakeChan(t *testing.T) {
 }
 
 func TestChan(t *testing.T) {
-	os.Setenv("ANKO_DEBUG", "1")
+	os.Setenv("ANKO_DEBUG", "")
 	tests := []testlib.Test{
-		{Script: `a = make(chan bool, 2); 1++ <- 1`, RunError: fmt.Errorf("invalid operation")},
-		{Script: `a = make(chan bool, 2); a <- 1++`, RunError: fmt.Errorf("invalid operation")},
+		// send on closed channel
+		{Script: `a = make(chan int64, 2); close(a); a <- 1`, RunError: fmt.Errorf("send on closed channel")},
+	}
+	testlib.Run(t, tests, nil)
 
-		// TODO: move close from core into vm code, then update tests
-
+	os.Setenv("ANKO_DEBUG", "1")
+	tests = []testlib.Test{
+		{Script: `1++ <- 1`, RunError: fmt.Errorf("invalid operation")},
+		{Script: `a = make(chan int64, 2); a <- 1++`, RunError: fmt.Errorf("invalid operation")},
 		{Script: `1 <- 1`, RunError: fmt.Errorf("invalid operation for chan")},
-		// TODO: this panics, should we capture the panic in a better way?
-		// {Script: `a = make(chan bool, 2); close(a); a <- true`, Input: map[string]interface{}{"close": func(b interface{}) { reflect.ValueOf(b).Close() }}, RunError: fmt.Errorf("channel is close")},
-		// TODO: add chan syntax ok
-		// {Script: `a = make(chan bool, 2); a <- true; close(a); b, ok <- a; ok`, Input: map[string]interface{}{"close": func(b interface{}) { reflect.ValueOf(b).Close() }}, RunOutput: false, Output: map[string]interface{}{"b": nil}},
-		{Script: `a = make(chan bool, 2); a <- true; close(a); b = false; b <- a`, Input: map[string]interface{}{"close": func(b interface{}) { reflect.ValueOf(b).Close() }}, RunOutput: true, Output: map[string]interface{}{"b": true}},
-		// TOFIX: add chan syntax ok, do not return error. Also b should be nil
-		{Script: `a = make(chan bool, 2); a <- true; close(a); b = false; b <- a; b <- a`, Input: map[string]interface{}{"close": func(b interface{}) { reflect.ValueOf(b).Close() }}, RunError: fmt.Errorf("failed to send to channel"), Output: map[string]interface{}{"b": true}},
-
 		{Script: `a = make(chan bool, 2); a <- 1`, RunError: fmt.Errorf("cannot use type int64 as type bool to send to chan")},
+		{Script: `close(1++)`, RunError: fmt.Errorf("invalid operation")},
+		{Script: `close(1)`, RunError: fmt.Errorf("type cannot be int64 for close")},
+
+		// send to channel
+		{Script: `a <- nil`, Input: map[string]interface{}{"a": make(chan interface{}, 2)}},
+		{Script: `a <- true`, Input: map[string]interface{}{"a": make(chan bool, 2)}},
+		{Script: `a <- 1`, Input: map[string]interface{}{"a": make(chan int32, 2)}},
+		{Script: `a <- 2`, Input: map[string]interface{}{"a": make(chan int64, 2)}},
+		{Script: `a <- 1.5`, Input: map[string]interface{}{"a": make(chan float32, 2)}},
+		{Script: `a <- 2.5`, Input: map[string]interface{}{"a": make(chan float64, 2)}},
+		{Script: `a <- "b"`, Input: map[string]interface{}{"a": make(chan string, 2)}},
+
+		{Script: `a = make(chan interface, 2); a <- nil`},
+		{Script: `a = make(chan bool, 2); a <- true`},
+		{Script: `a = make(chan int32, 2); a <- 1`},
+		{Script: `a = make(chan int64, 2); a <- 2`},
+		{Script: `a = make(chan float32, 2); a <- 1.5`},
+		{Script: `a = make(chan float64, 2); a <- 2.5`},
+		{Script: `a = make(chan string, 2); a <- "b"`},
+
+		// send to channel then receive from channel
+		{Script: `a <- nil; <- a`, Input: map[string]interface{}{"a": make(chan interface{}, 2)}, RunOutput: nil},
+		{Script: `a <- true; <- a`, Input: map[string]interface{}{"a": make(chan bool, 2)}, RunOutput: true},
+		{Script: `a <- 1; <- a`, Input: map[string]interface{}{"a": make(chan int32, 2)}, RunOutput: int32(1)},
+		{Script: `a <- 2; <- a`, Input: map[string]interface{}{"a": make(chan int64, 2)}, RunOutput: int64(2)},
+		{Script: `a <- 1.5; <- a`, Input: map[string]interface{}{"a": make(chan float32, 2)}, RunOutput: float32(1.5)},
+		{Script: `a <- 2.5; <- a`, Input: map[string]interface{}{"a": make(chan float64, 2)}, RunOutput: float64(2.5)},
+		{Script: `a <- "b"; <- a`, Input: map[string]interface{}{"a": make(chan string, 2)}, RunOutput: "b"},
 
 		{Script: `a = make(chan interface, 2); a <- nil; <- a`, RunOutput: nil},
 		{Script: `a = make(chan bool, 2); a <- true; <- a`, RunOutput: true},
 		{Script: `a = make(chan int32, 2); a <- 1; <- a`, RunOutput: int32(1)},
-		{Script: `a = make(chan int64, 2); a <- 1; <- a`, RunOutput: int64(1)},
-		{Script: `a = make(chan float32, 2); a <- 1.1; <- a`, RunOutput: float32(1.1)},
-		{Script: `a = make(chan float64, 2); a <- 1.1; <- a`, RunOutput: float64(1.1)},
+		{Script: `a = make(chan int64, 2); a <- 2; <- a`, RunOutput: int64(2)},
+		{Script: `a = make(chan float32, 2); a <- 1.5; <- a`, RunOutput: float32(1.5)},
+		{Script: `a = make(chan float64, 2); a <- 2.5; <- a`, RunOutput: float64(2.5)},
+		{Script: `a = make(chan string, 2); a <- "b"; <- a`, RunOutput: "b"},
 
-		{Script: `a <- nil; <- a`, Input: map[string]interface{}{"a": make(chan interface{}, 2)}, RunOutput: nil},
-		{Script: `a <- true; <- a`, Input: map[string]interface{}{"a": make(chan bool, 2)}, RunOutput: true},
-		{Script: `a <- 1; <- a`, Input: map[string]interface{}{"a": make(chan int32, 2)}, RunOutput: int32(1)},
-		{Script: `a <- 1; <- a`, Input: map[string]interface{}{"a": make(chan int64, 2)}, RunOutput: int64(1)},
-		{Script: `a <- 1.1; <- a`, Input: map[string]interface{}{"a": make(chan float32, 2)}, RunOutput: float32(1.1)},
-		{Script: `a <- 1.1; <- a`, Input: map[string]interface{}{"a": make(chan float64, 2)}, RunOutput: float64(1.1)},
-		{Script: `a <- "b"; <- a`, Input: map[string]interface{}{"a": make(chan string, 2)}, RunOutput: "b"},
+		// send to channel, receive from channel, then assign to variable
+		{Script: `a <- nil; b <- a`, Input: map[string]interface{}{"a": make(chan interface{}, 2)}, RunOutput: nil, Output: map[string]interface{}{"b": nil}},
+		{Script: `a <- true; b <- a`, Input: map[string]interface{}{"a": make(chan bool, 2)}, RunOutput: true, Output: map[string]interface{}{"b": true}},
+		{Script: `a <- 1; b <- a`, Input: map[string]interface{}{"a": make(chan int32, 2)}, RunOutput: int32(1), Output: map[string]interface{}{"b": int32(1)}},
+		{Script: `a <- 2; b <- a`, Input: map[string]interface{}{"a": make(chan int64, 2)}, RunOutput: int64(2), Output: map[string]interface{}{"b": int64(2)}},
+		{Script: `a <- 1.5; b <- a`, Input: map[string]interface{}{"a": make(chan float32, 2)}, RunOutput: float32(1.5), Output: map[string]interface{}{"b": float32(1.5)}},
+		{Script: `a <- 2.5; b <- a`, Input: map[string]interface{}{"a": make(chan float64, 2)}, RunOutput: float64(2.5), Output: map[string]interface{}{"b": float64(2.5)}},
+		{Script: `a <- "b"; b <- a`, Input: map[string]interface{}{"a": make(chan string, 2)}, RunOutput: "b", Output: map[string]interface{}{"b": "b"}},
 
-		{Script: `a = make(chan bool, 2); a <- true; a <- <- a`, RunOutput: nil},
-		{Script: `a = make(chan bool, 2); a <- true; a <- (<- a)`, RunOutput: nil},
-		{Script: `a = make(chan bool, 2); a <- true; a <- <- a; <- a`, RunOutput: true},
-		{Script: `a = make(chan bool, 2); a <- true; b = false; b <- a`, RunOutput: true, Output: map[string]interface{}{"b": true}},
-		// TOFIX: if variable is not created yet, should make variable instead of error
-		// {Script: `a = make(chan bool, 2); a <- true; b <- a`, RunOutput: true, Output: map[string]interface{}{"b": true}},
+		{Script: `a = make(chan interface, 2); a <- nil; b <- a`, RunOutput: nil, Output: map[string]interface{}{"b": nil}},
+		{Script: `a = make(chan bool, 2); a <- true; b <- a`, RunOutput: true, Output: map[string]interface{}{"b": true}},
+		{Script: `a = make(chan int32, 2); a <- 1; b <- a`, RunOutput: int32(1), Output: map[string]interface{}{"b": int32(1)}},
+		{Script: `a = make(chan int64, 2); a <- 2; b <- a`, RunOutput: int64(2), Output: map[string]interface{}{"b": int64(2)}},
+		{Script: `a = make(chan float32, 2); a <- 1.5; b <- a`, RunOutput: float32(1.5), Output: map[string]interface{}{"b": float32(1.5)}},
+		{Script: `a = make(chan float64, 2); a <- 2.5; b <- a`, RunOutput: float64(2.5), Output: map[string]interface{}{"b": float64(2.5)}},
+		{Script: `a = make(chan string, 2); a <- "b"; b <- a`, RunOutput: "b", Output: map[string]interface{}{"b": "b"}},
+
+		// receive from closed channel
+		{Script: `a = make(chan int64, 2); a <- 1; close(a); <- a`, RunOutput: int64(1)},
+		{Script: `a = make(chan int64, 2); a <- 1; close(a); <- a; <- a`, RunOutput: nil},
+
+		// receive & send from same channel
+		{Script: `a = make(chan int64, 2); a <- 1; a <- <- a`, RunOutput: nil},
+		{Script: `a = make(chan int64, 2); a <- 1; a <- <- a; <- a`, RunOutput: int64(1)},
+		{Script: `a = make(chan int64, 2); a <- 1; a <- <- a; b <- a`, RunOutput: int64(1), Output: map[string]interface{}{"b": int64(1)}},
+		{Script: `a = make(chan int64, 2); a <- 1; a <- (<- a)`, RunOutput: nil},
+		{Script: `a = make(chan int64, 2); a <- 1; a <- (<- a); <- a`, RunOutput: int64(1)},
+		{Script: `a = make(chan int64, 2); a <- 1; a <- (<- a); b <- a`, RunOutput: int64(1), Output: map[string]interface{}{"b": int64(1)}},
+
+		// 1 then null into a
+		{Script: `a = make(chan int64, 2); a <- a <- 1`, RunOutput: nil},
+		{Script: `a = make(chan int64, 2); a <- a <- 1; <- a`, RunOutput: int64(1)},
+		{Script: `a = make(chan int64, 2); a <- a <- 1; <- a; <- a`, RunOutput: int64(0)},
+
+		// receive & send different channel
+		{Script: `a = make(chan int64, 2); b = make(chan int64, 2); a <- 1; b <- <- a`, RunOutput: nil},
+		{Script: `a = make(chan int64, 2); b = make(chan int64, 2); a <- 1; b <- <- a; <- b`, RunOutput: int64(1)},
+		{Script: `a = make(chan int64, 2); b = make(chan int64, 2); a <- 1; b <- <- a; c <- b`, RunOutput: int64(1), Output: map[string]interface{}{"c": int64(1)}},
+		{Script: `a = make(chan int64, 2); b = make(chan int64, 2); a <- 1; b <- (<- a)`, RunOutput: nil},
+		{Script: `a = make(chan int64, 2); b = make(chan int64, 2); a <- 1; b <- (<- a); <- b`, RunOutput: int64(1)},
+		{Script: `a = make(chan int64, 2); b = make(chan int64, 2); a <- 1; b <- (<- a); c <- b`, RunOutput: int64(1), Output: map[string]interface{}{"c": int64(1)}},
+
+		// 1 into a then null into b
+		{Script: `a = make(chan int64, 2); b = make(chan int64, 2); b <- a <- 1`, RunOutput: nil},
+		{Script: `a = make(chan int64, 2); b = make(chan int64, 2); b <- a <- 1; <- a`, RunOutput: int64(1)},
+		{Script: `a = make(chan int64, 2); b = make(chan int64, 2); b <- a <- 1; <- a; <- b`, RunOutput: int64(0)},
+
+		// TODO: add receive ok
 	}
 	testlib.Run(t, tests, nil)
 }
@@ -541,18 +612,44 @@ func TestVMDelete(t *testing.T) {
 	os.Setenv("ANKO_DEBUG", "1")
 	tests := []testlib.Test{
 		{Script: `delete(1++)`, RunError: fmt.Errorf("invalid operation")},
-		{Script: `delete("a", 1++)`, RunError: fmt.Errorf("invalid operation")},
-
+		{Script: `delete(1)`, RunError: fmt.Errorf("first argument to delete cannot be type int64")},
 		{Script: `a = 1; delete("a"); a`, RunError: fmt.Errorf("undefined symbol 'a'")},
+		{Script: `a = {"b": "b"}; delete(a)`, RunError: fmt.Errorf("second argument to delete cannot be nil for map")},
 
+		{Script: `delete("a", 1++)`, RunError: fmt.Errorf("invalid operation")},
+		{Script: `b = []; delete(a, b)`, Input: map[string]interface{}{"a": map[int32]interface{}{2: int32(2)}}, RunError: fmt.Errorf("cannot use type int32 as type []interface {} in delete"), Output: map[string]interface{}{"a": map[int32]interface{}{2: int32(2)}}},
+
+		// test no variable
 		{Script: `delete("a")`},
 		{Script: `delete("a", false)`},
 		{Script: `delete("a", true)`},
 		{Script: `delete("a", nil)`},
 
+		// test DeleteGlobal
 		{Script: `a = 1; func b() { delete("a") }; b()`, Output: map[string]interface{}{"a": int64(1)}},
 		{Script: `a = 1; func b() { delete("a", false) }; b()`, Output: map[string]interface{}{"a": int64(1)}},
 		{Script: `a = 1; func b() { delete("a", true) }; b(); a`, RunError: fmt.Errorf("undefined symbol 'a'")},
+		{Script: `a = 2; func b() { a = 3; delete("a"); return a }; b()`, RunOutput: int64(3), Output: map[string]interface{}{"a": int64(3)}},
+		{Script: `a = 2; func b() { a = 3; delete("a", false); return a }; b()`, RunOutput: int64(3), Output: map[string]interface{}{"a": int64(3)}},
+		{Script: `a = 2; func b() { a = 3; delete("a", true); return a }; b()`, RunError: fmt.Errorf("undefined symbol 'a'")},
+		{Script: `a = 2; func b() { a = 3; delete("a") }; b(); a`, RunOutput: int64(3), Output: map[string]interface{}{"a": int64(3)}},
+		{Script: `a = 2; func b() { a = 3; delete("a", false) }; b(); a`, RunOutput: int64(3), Output: map[string]interface{}{"a": int64(3)}},
+		{Script: `a = 2; func b() { a = 3; delete("a", true) }; b(); a`, RunError: fmt.Errorf("undefined symbol 'a'")},
+
+		// test empty map
+		{Script: `delete(a, "a")`, Input: map[string]interface{}{"a": testMapEmpty}, Output: map[string]interface{}{"a": testMapEmpty}},
+
+		// test map
+		{Script: `a = {"b": "b"}; delete(a, "b")`, Output: map[string]interface{}{"a": map[interface{}]interface{}{}}},
+		{Script: `a = {"b": "b"}; delete(a, "b"); a.b`, Output: map[string]interface{}{"a": map[interface{}]interface{}{}}},
+		{Script: `a = {"b": "b", "c":"c"}; delete(a, "b")`, Output: map[string]interface{}{"a": map[interface{}]interface{}{"c": "c"}}},
+		{Script: `a = {"b": "b", "c":"c"}; delete(a, "b"); a.b`, Output: map[string]interface{}{"a": map[interface{}]interface{}{"c": "c"}}},
+
+		// test key convert
+		{Script: `delete(a, 2)`, Input: map[string]interface{}{"a": map[int32]interface{}{2: int32(2)}}, Output: map[string]interface{}{"a": map[int32]interface{}{}}},
+		{Script: `delete(a, 2); a[2]`, Input: map[string]interface{}{"a": map[int32]interface{}{2: int32(2)}}, Output: map[string]interface{}{"a": map[int32]interface{}{}}},
+		{Script: `delete(a, 2)`, Input: map[string]interface{}{"a": map[int32]interface{}{2: int32(2), 3: int32(3)}}, Output: map[string]interface{}{"a": map[int32]interface{}{3: int32(3)}}},
+		{Script: `delete(a, 2); a[2]`, Input: map[string]interface{}{"a": map[int32]interface{}{2: int32(2), 3: int32(3)}}, Output: map[string]interface{}{"a": map[int32]interface{}{3: int32(3)}}},
 	}
 	testlib.Run(t, tests, nil)
 }
@@ -673,18 +770,18 @@ func TestComment(t *testing.T) {
 	testlib.Run(t, tests, nil)
 }
 
-func TestInterrupts(t *testing.T) {
+func TestCancelWithContext(t *testing.T) {
 	scripts := []string{
 		`
 b = 0
-closeWaitChan()
+close(waitChan)
 for {
 	b = 1
 }
 `,
 		`
 b = 0
-closeWaitChan()
+close(waitChan)
 for {
 	for {
 		b = 1
@@ -693,22 +790,24 @@ for {
 `,
 		`
 a = []
-for i = 0; i < 10000; i++ {
+for i = 0; i < 20000; i++ {
 	a += 1
 }
 b = 0
-closeWaitChan()
-for i in a {
-	b = i
+close(waitChan)
+for {
+	for i in a {
+		b = i
+	}
 }
 `,
 		`
 a = []
-for i = 0; i < 10000; i++ {
+for i = 0; i < 20000; i++ {
 	a += 1
 }
 b = 0
-closeWaitChan()
+close(waitChan)
 for i in a {
 	for j in a {
 		b = j
@@ -716,14 +815,14 @@ for i in a {
 }
 `,
 		`
-closeWaitChan()
+close(waitChan)
 b = 0
 for i = 0; true; nil {
 }
 `,
 		`
 b = 0
-closeWaitChan()
+close(waitChan)
 for i = 0; true; nil {
 	for j = 0; true; nil {
 		b = 1
@@ -732,44 +831,80 @@ for i = 0; true; nil {
 `,
 		`
 a = {}
-for i = 0; i < 10000; i++ {
+for i = 0; i < 20000; i++ {
 	a[toString(i)] = 1
 }
 b = 0
-closeWaitChan()
-for i in a {
-	b = 1
+close(waitChan)
+for {
+	for i in a {
+		b = 1
+	}
 }
 `,
 		`
 a = {}
-for i = 0; i < 10000; i++ {
+for i = 0; i < 20000; i++ {
 	a[toString(i)] = 1
 }
 b = 0
-closeWaitChan()
+close(waitChan)
 for i in a {
 	for j in a {
 		b = 1
 	}
 }
 `,
+		`
+close(waitChan)
+<-make(chan string)
+`,
+		`
+a = ""
+close(waitChan)
+a <-make(chan string)
+`,
+		`
+for {
+	a = ""
+	close(waitChan)
+	a <-make(chan string)
+}
+`,
+		`
+a = make(chan int)
+close(waitChan)
+a <- 1
+`,
+		`
+a = make(chan interface)
+close(waitChan)
+a <- nil
+`,
+		`
+a = make(chan int64, 1)
+close(waitChan)
+for v in a { }
+`,
+		`
+close(waitChan)
+try {
+	for { }
+} catch { }
+`,
 	}
 	for _, script := range scripts {
-		runInterruptTest(t, script)
+		runCancelTestWithContext(t, script)
 	}
 }
 
-func runInterruptTest(t *testing.T, script string) {
+func runCancelTestWithContext(t *testing.T, script string) {
 	waitChan := make(chan struct{}, 1)
-	closeWaitChan := func() {
-		close(waitChan)
-	}
 	toString := func(value interface{}) string {
 		return fmt.Sprintf("%v", value)
 	}
 	env := NewEnv()
-	err := env.Define("closeWaitChan", closeWaitChan)
+	err := env.Define("waitChan", waitChan)
 	if err != nil {
 		t.Errorf("Define error: %v", err)
 	}
@@ -778,51 +913,64 @@ func runInterruptTest(t *testing.T, script string) {
 		t.Errorf("Define error: %v", err)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		<-waitChan
-		Interrupt(env)
+		time.Sleep(time.Millisecond)
+		cancel()
 	}()
 
-	_, err = env.Execute(script)
+	_, err = env.ExecuteContext(ctx, script)
 	if err == nil || err.Error() != ErrInterrupt.Error() {
-		t.Errorf("execute error - received %#v - expected: %#v", err, ErrInterrupt)
+		t.Errorf("execute error - received %#v - expected: %#v - script: %v", err, ErrInterrupt, script)
 	}
 }
 
-func TestInterruptConcurrency(t *testing.T) {
+func TestContextConcurrency(t *testing.T) {
 	var waitGroup sync.WaitGroup
 	env := NewEnv()
 
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
 	waitGroup.Add(100)
 	for i := 0; i < 100; i++ {
 		go func() {
-			_, err := env.Execute("for { }")
+			_, err := env.ExecuteContext(ctx, "for { }")
 			if err == nil || err.Error() != ErrInterrupt.Error() {
 				t.Errorf("execute error - received %#v - expected: %#v", err, ErrInterrupt)
 			}
 			waitGroup.Done()
 		}()
 	}
-	time.Sleep(time.Millisecond)
-	Interrupt(env)
+	cancel()
 	waitGroup.Wait()
+	cancel()
 
-	_, err := env.Execute("for { }")
+	_, err := env.ExecuteContext(ctx, "for { }")
 	if err == nil || err.Error() != ErrInterrupt.Error() {
 		t.Errorf("execute error - received %#v - expected: %#v", err, ErrInterrupt)
 	}
 
-	ClearInterrupt(env)
-
-	_, err = env.Execute("for i = 0; i < 1000; i ++ {}")
+	ctx, cancel = context.WithCancel(context.Background())
+	_, err = env.ExecuteContext(ctx, "for i = 0; i < 1000; i++ {}")
 	if err != nil {
 		t.Errorf("execute error - received: %v - expected: %v", err, nil)
 	}
+	waitGroup.Add(100)
+	for i := 0; i < 100; i++ {
+		go func() {
+			_, err := env.ExecuteContext(ctx, "for i = 0; i < 1000; i++ { }")
+			if err != nil {
+				t.Errorf("execute error - received: %v - expected: %v", err, nil)
+			}
+			waitGroup.Done()
+		}()
+	}
+	waitGroup.Wait()
 
 	waitGroup.Add(100)
 	for i := 0; i < 100; i++ {
 		go func() {
-			_, err := env.Execute("for { }")
+			_, err := env.ExecuteContext(ctx, "for { }")
 			if err == nil || err.Error() != ErrInterrupt.Error() {
 				t.Errorf("execute error - received %#v - expected: %#v", err, ErrInterrupt)
 			}
@@ -830,43 +978,45 @@ func TestInterruptConcurrency(t *testing.T) {
 		}()
 	}
 	time.Sleep(time.Millisecond)
-	Interrupt(env)
+	cancel()
+	waitGroup.Wait()
+
+	waitGroup.Add(100)
+	for i := 0; i < 100; i++ {
+		go func() {
+			_, err := env.Execute("for i = 0; i < 1000; i++ { }")
+			if err != nil {
+				t.Errorf("execute error - received: %v - expected: %v", err, nil)
+			}
+			waitGroup.Done()
+		}()
+	}
 	waitGroup.Wait()
 }
 
-func TestRunSingleStmt(t *testing.T) {
-	stmts, err := parser.ParseSrc(`a = 1`)
-	if err != nil {
-		t.Errorf("ParseSrc error - received: %v - expected: %v", err, nil)
-	}
-
+func TestContextFunction(t *testing.T) {
 	env := NewEnv()
-	value, err := RunSingleStmt(stmts[0], env)
-	if err != nil {
-		t.Errorf("RunSingleStmt error - received: %v - expected: %v", err, nil)
-	}
-	if value != int64(1) {
-		t.Errorf("RunSingleStmt value - received: %v - expected: %v", value, int64(1))
-	}
+	script := `
+func myFunc(myVar) {
+	myVar = 3
+}`
+	envModule := env.NewModule("a")
 
-	stmts, err = parser.ParseSrc(`return a`)
+	ctx, cancel := context.WithCancel(context.Background())
+	_, err := envModule.ExecuteContext(ctx, script)
 	if err != nil {
-		t.Errorf("ParseSrc error - received: %v - expected: %v", err, nil)
+		t.Errorf("execute error - received %#v - expected: %#v", err, nil)
 	}
+	cancel()
 
-	env = NewEnv()
-	err = env.defineValue("a", reflect.Value{})
-	if err != nil {
-		t.Errorf("defineValue error - received: %v - expected: %v", err, nil)
-	}
+	script = "a.myFunc(2)"
 
-	value, err = RunSingleStmt(stmts[0], env)
+	ctx, cancel = context.WithCancel(context.Background())
+	_, err = env.ExecuteContext(ctx, script)
 	if err != nil {
-		t.Errorf("RunSingleStmt error - received: %v - expected: %v", err, nil)
+		t.Errorf("execute error - received %#v - expected: %#v", err, nil)
 	}
-	if value != nil {
-		t.Errorf("RunSingleStmt value - received: %v - expected: %v", value, nil)
-	}
+	cancel()
 }
 
 func TestAssignToInterface(t *testing.T) {
@@ -901,5 +1051,85 @@ func TestValueEqual(t *testing.T) {
 	result = ValueEqual(false, true)
 	if result != false {
 		t.Fatal("ValueEqual")
+	}
+}
+
+// TestUnknownCases tests switch cases that are the unknown cases
+func TestUnknownCases(t *testing.T) {
+	oneLiteral := &ast.LiteralExpr{Literal: reflect.ValueOf(int64(1))}
+	type (
+		BadStmt struct {
+			ast.StmtImpl
+		}
+		BadExpr struct {
+			ast.ExprImpl
+		}
+		BadOperator struct {
+			ast.OperatorImpl
+		}
+	)
+
+	stmts := []ast.Stmt{
+		&BadStmt{},
+		&ast.ExprStmt{Expr: &BadExpr{}},
+		&ast.ExprStmt{Expr: &ast.OpExpr{Op: &BadOperator{}}},
+		&ast.ExprStmt{Expr: &ast.UnaryExpr{Expr: oneLiteral}},
+		&ast.ExprStmt{Expr: &ast.OpExpr{Op: &ast.BinaryOperator{LHS: oneLiteral}}},
+		&ast.ExprStmt{Expr: &ast.OpExpr{Op: &ast.ComparisonOperator{LHS: oneLiteral, RHS: oneLiteral}}},
+		&ast.ExprStmt{Expr: &ast.OpExpr{Op: &ast.AddOperator{LHS: oneLiteral, RHS: oneLiteral}}},
+		&ast.ExprStmt{Expr: &ast.OpExpr{Op: &ast.MultiplyOperator{LHS: oneLiteral, RHS: oneLiteral}}},
+	}
+
+	for _, stmt := range stmts {
+		env := NewEnv()
+		_, err := env.Run(stmt)
+		if err == nil {
+			t.Errorf("no error - stmt: %#v", stmt)
+		} else if len(err.Error()) < 9 || err.Error()[:8] != "unknown " {
+			t.Errorf("err: %v - stmt: %#v", err, stmt)
+		}
+	}
+}
+
+func fib(x int) int {
+	if x < 2 {
+		return x
+	}
+	return fib(x-1) + fib(x-2)
+}
+
+func BenchmarkFibGo(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		fib(29)
+	}
+}
+
+func BenchmarkFibVM(b *testing.B) {
+	b.StopTimer()
+
+	env := NewEnv()
+	envA := env.NewModule("a")
+
+	script := `
+fib = func(x) {
+	if x < 2 {
+		return x
+	}
+	return fib(x-1) + fib(x-2)
+}`
+
+	_, err := envA.Execute(script)
+	if err != nil {
+		b.Fatal("Execute error:", err)
+	}
+
+	b.ResetTimer()
+	b.StartTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, err = env.Execute("a.fib(29)")
+		if err != nil {
+			b.Fatal("Execute error:", err)
+		}
 	}
 }

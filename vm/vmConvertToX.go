@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 )
@@ -10,10 +11,6 @@ import (
 func reflectValueSlicetoInterfaceSlice(valueSlice []reflect.Value) reflect.Value {
 	interfaceSlice := make([]interface{}, 0, len(valueSlice))
 	for _, value := range valueSlice {
-		if !value.IsValid() {
-			interfaceSlice = append(interfaceSlice, nil)
-			continue
-		}
 		if value.Kind() == reflect.Interface && !value.IsNil() {
 			value = value.Elem()
 		}
@@ -27,29 +24,29 @@ func reflectValueSlicetoInterfaceSlice(valueSlice []reflect.Value) reflect.Value
 }
 
 // convertReflectValueToType trys to covert the reflect.Value to the reflect.Type
-// if it can not, it returns the orginal rv and an error
+// if it can not, it returns the original rv and an error
 func convertReflectValueToType(rv reflect.Value, rt reflect.Type) (reflect.Value, error) {
-	if !rv.IsValid() {
-		// if not valid return a valid reflect.Value of the reflect.Type
-		return makeValue(rt)
-	}
 	if rt == interfaceType || rv.Type() == rt {
 		// if reflect.Type is interface or the types match, return the provided reflect.Value
 		return rv, nil
 	}
 	if rv.Type().ConvertibleTo(rt) {
-		// if reflect can covert, do that convertion and return
+		// if reflect can covert, do that conversion and return
 		return rv.Convert(rt), nil
 	}
 	if (rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array) &&
 		(rt.Kind() == reflect.Slice || rt.Kind() == reflect.Array) {
+		// covert slice or array
 		return convertSliceOrArray(rv, rt)
 	}
 	if rv.Kind() == rt.Kind() {
 		// kind matches
 		switch rv.Kind() {
+		case reflect.Map:
+			// convert map
+			return convertMap(rv, rt)
 		case reflect.Func:
-			// for runVMFunction convertions, call convertVMFunctionToType
+			// for runVMFunction conversions, call convertVMFunctionToType
 			return convertVMFunctionToType(rv, rt)
 		case reflect.Ptr:
 			// both rv and rt are pointers, convert what they are pointing to
@@ -68,7 +65,11 @@ func convertReflectValueToType(rv reflect.Value, rt reflect.Type) (reflect.Value
 		}
 	}
 	if rv.Type() == interfaceType {
-		// reflect.Value is an interface, so try to convert the element
+		if rv.IsNil() {
+			// return nil of correct type
+			return reflect.Zero(rt), nil
+		}
+		// try to convert the element
 		return convertReflectValueToType(rv.Elem(), rt)
 	}
 
@@ -77,6 +78,7 @@ func convertReflectValueToType(rv reflect.Value, rt reflect.Type) (reflect.Value
 	return rv, fmt.Errorf("invalid type conversion")
 }
 
+// convertSliceOrArray trys to covert the reflect.Value slice or array to the slice or array reflect.Type
 func convertSliceOrArray(rv reflect.Value, rt reflect.Type) (reflect.Value, error) {
 	rtElemType := rt.Elem()
 
@@ -93,10 +95,6 @@ func convertSliceOrArray(rv reflect.Value, rt reflect.Type) (reflect.Value, erro
 	var err error
 	var v reflect.Value
 	for i := 0; i < rv.Len(); i++ {
-		if !value.Index(i).CanSet() {
-			// is there a way for new slice/array not to be settable?
-			return rv, fmt.Errorf("invalid type conversion")
-		}
 		v, err = convertReflectValueToType(rv.Index(i), rtElemType)
 		if err != nil {
 			return rv, err
@@ -106,6 +104,39 @@ func convertSliceOrArray(rv reflect.Value, rt reflect.Type) (reflect.Value, erro
 
 	// return new converted slice or array
 	return value, nil
+}
+
+// convertMap trys to covert the reflect.Value map to the map reflect.Type
+func convertMap(rv reflect.Value, rt reflect.Type) (reflect.Value, error) {
+	rtKey := rt.Key()
+	rtElem := rt.Elem()
+
+	// create new map
+	// note creating slice as work around to create map
+	// just doing MakeMap can give incorrect type for defined types
+	newMap := reflect.MakeSlice(reflect.SliceOf(rt), 0, 1)
+	newMap = reflect.Append(newMap, reflect.MakeMap(reflect.MapOf(rtKey, rtElem))).Index(0)
+
+	// copy keys to new map
+	// The only way to do this right now is to get all the keys.
+	// At some point there will be a MapRange that could be used.
+	// https://github.com/golang/go/issues/11104
+	// In the mean time using MapKeys, which will costly for large maps.
+	mapKeys := rv.MapKeys()
+	for i := 0; i < len(mapKeys); i++ {
+		newKey, err := convertReflectValueToType(mapKeys[i], rtKey)
+		if err != nil {
+			return rv, err
+		}
+		value := rv.MapIndex(mapKeys[i])
+		value, err = convertReflectValueToType(value, rtElem)
+		if err != nil {
+			return rv, err
+		}
+		newMap.SetMapIndex(newKey, value)
+	}
+
+	return newMap, nil
 }
 
 // convertVMFunctionToType is for translating a runVMFunction into the correct type
@@ -124,7 +155,10 @@ func convertVMFunctionToType(rv reflect.Value, rt reflect.Type) (reflect.Value, 
 		// only way to pass along any errors is by panic
 
 		// make the reflect.Value slice of each of the VM reflect.Value
-		args := make([]reflect.Value, 0, rt.NumIn())
+		args := make([]reflect.Value, 0, rt.NumIn()+1)
+		// for runVMFunction first arg is always context
+		// TOFIX: use normal context
+		args = append(args, reflect.ValueOf(context.Background()))
 		for i := 0; i < rt.NumIn(); i++ {
 			// have to do the double reflect.ValueOf that runVMFunction expects
 			args = append(args, reflect.ValueOf(in[i]))
@@ -157,9 +191,6 @@ func convertVMFunctionToType(rv reflect.Value, rt reflect.Type) (reflect.Value, 
 		// Go function wants more than one return value
 		// make sure we have a slice/array with enought values
 
-		if !rv.IsValid() {
-			panic(fmt.Sprintf("function wants %v return values but received invalid", rt.NumOut()))
-		}
 		if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
 			panic(fmt.Sprintf("function wants %v return values but received %v", rt.NumOut(), rv.Kind().String()))
 		}

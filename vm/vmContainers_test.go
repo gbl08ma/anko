@@ -193,10 +193,10 @@ func TestArrays(t *testing.T) {
 		{Script: `a[0][0] = b[0][0]`, Input: map[string]interface{}{"a": []interface{}{[]bool{true}}, "b": []interface{}{[]string{"b"}}}, RunError: fmt.Errorf("type string cannot be assigned to type bool for array index"), Output: map[string]interface{}{"a": []interface{}{[]bool{true}}}},
 		{Script: `b[0][0] = a[0][0]`, Input: map[string]interface{}{"a": []interface{}{[]bool{true}}, "b": []interface{}{[]string{"b"}}}, RunError: fmt.Errorf("type bool cannot be assigned to type string for array index"), Output: map[string]interface{}{"a": []interface{}{[]bool{true}}}},
 
-		{Script: `a = make([][]bool); a[0] =  make([]bool); a[0] = [true, 1]`, RunError: fmt.Errorf("invalid type conversion"), Output: map[string]interface{}{"a": [][]bool{{}}}},
-		{Script: `a = make([][]bool); a[0] =  make([]bool); a[0] = [true, false]`, RunOutput: []interface{}{true, false}, Output: map[string]interface{}{"a": [][]bool{{true, false}}}},
+		{Script: `a = make([][]bool); a[0] = make([]bool); a[0] = [true, 1]`, RunError: fmt.Errorf("type []interface {} cannot be assigned to type []bool for array index"), Output: map[string]interface{}{"a": [][]bool{{}}}},
+		{Script: `a = make([][]bool); a[0] = make([]bool); a[0] = [true, false]`, RunOutput: []interface{}{true, false}, Output: map[string]interface{}{"a": [][]bool{{true, false}}}},
 
-		{Script: `a = make([][][]bool); a[0] = make([][]bool); a[0][0] = make([]bool); a[0] = [[true, 1]]`, RunError: fmt.Errorf("invalid type conversion"), Output: map[string]interface{}{"a": [][][]bool{{{}}}}},
+		{Script: `a = make([][][]bool); a[0] = make([][]bool); a[0][0] = make([]bool); a[0] = [[true, 1]]`, RunError: fmt.Errorf("type []interface {} cannot be assigned to type [][]bool for array index"), Output: map[string]interface{}{"a": [][][]bool{{{}}}}},
 		{Script: `a = make([][][]bool); a[0] = make([][]bool); a[0][0] = make([]bool); a[0] = [[true, false]]`, RunOutput: []interface{}{[]interface{}{true, false}}, Output: map[string]interface{}{"a": [][][]bool{{{true, false}}}}},
 	}
 	testlib.Run(t, tests, nil)
@@ -229,14 +229,18 @@ func TestArraysAutoAppend(t *testing.T) {
 		{Script: `a[3] = 4.4`, Input: map[string]interface{}{"a": []float64{1.1, 2.2}}, RunError: fmt.Errorf("index out of range"), Output: map[string]interface{}{"a": []float64{1.1, 2.2}}},
 		{Script: `a[3] = "d"`, Input: map[string]interface{}{"a": []string{"a", "b"}}, RunError: fmt.Errorf("index out of range"), Output: map[string]interface{}{"a": []string{"a", "b"}}},
 
-		{Script: `a[2] = nil`, Input: map[string]interface{}{"a": []bool{true, false}}, RunError: fmt.Errorf("type interface {} cannot be assigned to type bool for array index"), Output: map[string]interface{}{"a": []bool{true, false}}},
-		{Script: `a[2] = nil`, Input: map[string]interface{}{"a": []int32{1, 2}}, RunError: fmt.Errorf("type interface {} cannot be assigned to type int32 for array index"), Output: map[string]interface{}{"a": []int32{1, 2}}},
+		{Script: `a[2] = nil`, Input: map[string]interface{}{"a": []bool{true, false}}, Output: map[string]interface{}{"a": []bool{true, false, false}}},
+		{Script: `a[2] = nil`, Input: map[string]interface{}{"a": []int32{1, 2}}, Output: map[string]interface{}{"a": []int32{1, 2, 0}}},
+		{Script: `a[2] = nil`, Input: map[string]interface{}{"a": []int64{1, 2}}, Output: map[string]interface{}{"a": []int64{1, 2, 0}}},
+		{Script: `a[2] = nil`, Input: map[string]interface{}{"a": []float32{1.5, 2.5}}, Output: map[string]interface{}{"a": []float32{1.5, 2.5, 0}}},
+		{Script: `a[2] = nil`, Input: map[string]interface{}{"a": []float64{1.5, 2.5}}, Output: map[string]interface{}{"a": []float64{1.5, 2.5, 0}}},
+		{Script: `a[2] = nil`, Input: map[string]interface{}{"a": []string{"a", "b"}}, Output: map[string]interface{}{"a": []string{"a", "b", ""}}},
+
 		{Script: `a[2] = "a"`, Input: map[string]interface{}{"a": []int32{1, 2}}, RunError: fmt.Errorf("type string cannot be assigned to type int32 for array index"), Output: map[string]interface{}{"a": []int32{1, 2}}},
 		{Script: `a[2] = true`, Input: map[string]interface{}{"a": []int64{1, 2}}, RunError: fmt.Errorf("type bool cannot be assigned to type int64 for array index"), Output: map[string]interface{}{"a": []int64{1, 2}}},
 		{Script: `a[2] = "a"`, Input: map[string]interface{}{"a": []int64{1, 2}}, RunError: fmt.Errorf("type string cannot be assigned to type int64 for array index"), Output: map[string]interface{}{"a": []int64{1, 2}}},
 		{Script: `a[2] = true`, Input: map[string]interface{}{"a": []float32{1.1, 2.2}}, RunError: fmt.Errorf("type bool cannot be assigned to type float32 for array index"), Output: map[string]interface{}{"a": []float32{1.1, 2.2}}},
 		{Script: `a[2] = "a"`, Input: map[string]interface{}{"a": []float64{1.1, 2.2}}, RunError: fmt.Errorf("type string cannot be assigned to type float64 for array index"), Output: map[string]interface{}{"a": []float64{1.1, 2.2}}},
-		{Script: `a[2] = nil`, Input: map[string]interface{}{"a": []string{"a", "b"}}, RunError: fmt.Errorf("type interface {} cannot be assigned to type string for array index"), Output: map[string]interface{}{"a": []string{"a", "b"}}},
 		{Script: `a[2] = true`, Input: map[string]interface{}{"a": []string{"a", "b"}}, RunError: fmt.Errorf("type bool cannot be assigned to type string for array index"), Output: map[string]interface{}{"a": []string{"a", "b"}}},
 		{Script: `a[2] = 1.1`, Input: map[string]interface{}{"a": []string{"a", "b"}}, RunError: fmt.Errorf("type float64 cannot be assigned to type string for array index"), Output: map[string]interface{}{"a": []string{"a", "b"}}},
 
@@ -257,10 +261,10 @@ func TestArraysAutoAppend(t *testing.T) {
 		{Script: `a = make([]bool); a[0] = 1`, RunError: fmt.Errorf("type int64 cannot be assigned to type bool for array index"), Output: map[string]interface{}{"a": []bool{}}},
 		{Script: `a = make([]bool); a[0] = true; a[1] = false`, RunOutput: false, Output: map[string]interface{}{"a": []bool{true, false}}},
 
-		{Script: `a = make([][]bool); a[0] = [true, 1]`, RunError: fmt.Errorf("invalid type conversion"), Output: map[string]interface{}{"a": [][]bool{}}},
+		{Script: `a = make([][]bool); a[0] = [true, 1]`, RunError: fmt.Errorf("type []interface {} cannot be assigned to type []bool for array index"), Output: map[string]interface{}{"a": [][]bool{}}},
 		{Script: `a = make([][]bool); a[0] = [true, false]`, RunOutput: []interface{}{true, false}, Output: map[string]interface{}{"a": [][]bool{{true, false}}}},
 
-		{Script: `a = make([][][]bool); a[0] = [[true, 1]]`, RunError: fmt.Errorf("invalid type conversion"), Output: map[string]interface{}{"a": [][][]bool{}}},
+		{Script: `a = make([][][]bool); a[0] = [[true, 1]]`, RunError: fmt.Errorf("type []interface {} cannot be assigned to type [][]bool for array index"), Output: map[string]interface{}{"a": [][][]bool{}}},
 		{Script: `a = make([][][]bool); a[0] = [[true, false]]`, RunOutput: []interface{}{[]interface{}{true, false}}, Output: map[string]interface{}{"a": [][][]bool{{{true, false}}}}},
 	}
 	testlib.Run(t, tests, nil)
@@ -527,13 +531,15 @@ func TestArraySlice(t *testing.T) {
 func TestArrayAppendArrays(t *testing.T) {
 	os.Setenv("ANKO_DEBUG", "1")
 	tests := []testlib.Test{
-		{Script: `a += nil`, Input: map[string]interface{}{"a": []bool{true}}, RunError: fmt.Errorf("invalid type conversion")},
 		{Script: `a += 1`, Input: map[string]interface{}{"a": []bool{true}}, RunError: fmt.Errorf("invalid type conversion")},
 		{Script: `a += 1.1`, Input: map[string]interface{}{"a": []bool{true}}, RunError: fmt.Errorf("invalid type conversion")},
 		{Script: `a += "a"`, Input: map[string]interface{}{"a": []bool{true}}, RunError: fmt.Errorf("invalid type conversion")},
+		{Script: `a += b`, Input: map[string]interface{}{"a": "a", "b": []bool{true}}, RunError: fmt.Errorf("invalid type conversion")},
 
 		{Script: `a += b`, Input: map[string]interface{}{"a": []bool{true}, "b": []string{"b"}}, RunError: fmt.Errorf("invalid type conversion")},
 		{Script: `b += a`, Input: map[string]interface{}{"a": []bool{true}, "b": []string{"b"}}, RunError: fmt.Errorf("invalid type conversion")},
+
+		{Script: `a += nil`, Input: map[string]interface{}{"a": []bool{true}}, RunOutput: []bool{true, false}, Output: map[string]interface{}{"a": []bool{true, false}}},
 
 		{Script: `b = []; b += a`, Input: map[string]interface{}{"a": []bool{}}, RunOutput: []interface{}{}, Output: map[string]interface{}{"a": []bool{}, "b": []interface{}{}}},
 		{Script: `b = []; b += a`, Input: map[string]interface{}{"a": []bool{true}}, RunOutput: []interface{}{true}, Output: map[string]interface{}{"a": []bool{true}, "b": []interface{}{true}}},
@@ -790,8 +796,8 @@ func TestMaps(t *testing.T) {
 	tests := []testlib.Test{
 		{Script: `{"b": 1++}`, RunError: fmt.Errorf("invalid operation")},
 		{Script: `{1++: 1}`, RunError: fmt.Errorf("invalid operation")},
-		{Script: `a = {}; a.b.c`, RunError: fmt.Errorf("type invalid does not support member operation")},
-		{Script: `a = {}; a.b.c = 1`, RunError: fmt.Errorf("type invalid does not support member operation")},
+		{Script: `a = {}; a.b.c`, RunError: fmt.Errorf("type interface does not support member operation")},
+		{Script: `a = {}; a.b.c = 1`, RunError: fmt.Errorf("type interface does not support member operation")},
 		{Script: `a = {}; a[1++]`, RunError: fmt.Errorf("invalid operation")},
 		{Script: `a = {}; a[1++] = 1`, RunError: fmt.Errorf("invalid operation")},
 		{Script: `b[1]`, RunError: fmt.Errorf("undefined symbol 'b'")},
@@ -1591,6 +1597,68 @@ func TestStructs(t *testing.T) {
 				A interface{}
 				B interface{}
 			}{A: int64(1), B: int64(3)}}},
+
+		// nil tests
+		{Script: `a.A = nil; a.B = nil; a.C = nil;`, Input: map[string]interface{}{"a": &struct {
+			A *bool
+			B *int32
+			C *int64
+		}{A: new(bool), B: new(int32), C: new(int64)}},
+			RunOutput: nil,
+			Output: map[string]interface{}{"a": &struct {
+				A *bool
+				B *int32
+				C *int64
+			}{A: nil, B: nil, C: nil}}},
+		{Script: `a.A = nil; a.B = nil; a.C = nil;`, Input: map[string]interface{}{"a": &struct {
+			A *float32
+			B *float64
+			C *string
+		}{A: new(float32), B: new(float64), C: new(string)}},
+			RunOutput: nil,
+			Output: map[string]interface{}{"a": &struct {
+				A *float32
+				B *float64
+				C *string
+			}{A: nil, B: nil, C: nil}}},
+		{Script: `a.A = nil; a.B = nil; a.C = nil;`, Input: map[string]interface{}{"a": &struct {
+			A interface{}
+			B []interface{}
+			C [][]interface{}
+		}{A: "a", B: []interface{}{"b"}, C: [][]interface{}{{"c"}}}},
+			RunOutput: nil,
+			Output: map[string]interface{}{"a": &struct {
+				A interface{}
+				B []interface{}
+				C [][]interface{}
+			}{A: nil, B: nil, C: nil}}},
+		{Script: `a.A = nil; a.B = nil; a.C = nil; a.D = nil;`, Input: map[string]interface{}{"a": &struct {
+			A map[string]string
+			B map[string]interface{}
+			C map[interface{}]string
+			D map[interface{}]interface{}
+		}{A: map[string]string{"a": "a"}, B: map[string]interface{}{"b": "b"}, C: map[interface{}]string{"c": "c"}, D: map[interface{}]interface{}{"d": "d"}}},
+			RunOutput: nil,
+			Output: map[string]interface{}{"a": &struct {
+				A map[string]string
+				B map[string]interface{}
+				C map[interface{}]string
+				D map[interface{}]interface{}
+			}{A: nil, B: nil, C: nil, D: nil}}},
+		{Script: `a.A.AA = nil;`, Input: map[string]interface{}{"a": &struct {
+			A struct{ AA *int64 }
+		}{A: struct{ AA *int64 }{AA: new(int64)}}},
+			RunOutput: nil,
+			Output: map[string]interface{}{"a": &struct {
+				A struct{ AA *int64 }
+			}{A: struct{ AA *int64 }{AA: nil}}}},
+		{Script: `a.A = nil;`, Input: map[string]interface{}{"a": &struct {
+			A *struct{ AA *int64 }
+		}{A: &struct{ AA *int64 }{AA: new(int64)}}},
+			RunOutput: nil,
+			Output: map[string]interface{}{"a": &struct {
+				A *struct{ AA *int64 }
+			}{A: nil}}},
 	}
 	testlib.Run(t, tests, nil)
 }

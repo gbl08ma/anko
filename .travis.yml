@@ -1,7 +1,6 @@
 language: go
 
 go:
-  - 1.6.x
   - 1.7.x
   - 1.8.x
   - 1.9.x
@@ -15,7 +14,7 @@ before_install:
   - if [[ "$TRAVIS_GO_VERSION" =~ ^1\.(1[0-9]|[8-9])\.[0-9]$ ]]; then go get -u github.com/haya14busa/goverage; fi
 
 script:
-  - if [[ "$TRAVIS_GO_VERSION" =~ ^1\.(1[0-9]|[8-9])\.[0-9]$ ]]; then goverage -v -coverprofile=coverage.txt -covermode=count . ./ast/astutil ./vm ./core ./packages; else go test -v github.com/gbl08ma/anko github.com/gbl08ma/anko/ast/astutil github.com/gbl08ma/anko/core github.com/gbl08ma/anko/packages; go test -v -coverprofile=coverage.txt -covermode=count github.com/gbl08ma/anko/vm; fi
+  - if [[ "$TRAVIS_GO_VERSION" =~ ^1\.(1[0-9]|[8-9])\.[0-9]$ ]]; then goverage -v -coverprofile=coverage.txt -covermode=count ./vm ./core ./packages . ./ast/astutil; else go test -v github.com/gbl08ma/anko/vm github.com/gbl08ma/anko/core github.com/gbl08ma/anko/packages github.com/gbl08ma/anko/ast/astutil github.com/gbl08ma/anko; go test -v -coverprofile=coverage.txt -covermode=count github.com/gbl08ma/anko/vm; fi
 
 after_success:
   - bash <(curl -s https://codecov.io/bash)
