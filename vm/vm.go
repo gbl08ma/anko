@@ -369,11 +369,7 @@ func makeValue(t reflect.Type) (reflect.Value, error) {
 		return value.Index(0), nil
 	case reflect.Ptr:
 		ptrV := reflect.New(t.Elem())
-		v, err := makeValue(t.Elem())
-		if err != nil {
-			return nilValue, err
-		}
-
+		v := reflect.New(t.Elem()).Elem()
 		ptrV.Elem().Set(v)
 		return ptrV, nil
 	case reflect.Slice:
