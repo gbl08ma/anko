@@ -126,7 +126,7 @@ func (runInfo *runInfoStruct) invokeLetExpr() {
 				// try to do automatic append
 				value, runInfo.err = convertReflectValueToType(value, item.Type().Elem())
 				if runInfo.err != nil {
-					runInfo.err = newStringError(expr, "type "+value.Type().String()+" cannot be assigned to type "+item.Type().Elem().String()+" for array index")
+					runInfo.err = newStringError(expr, "type "+value.Type().String()+" cannot be assigned to type "+item.Type().Elem().String()+" for slice index")
 					runInfo.rv = nilValue
 					return
 				}
@@ -152,7 +152,7 @@ func (runInfo *runInfoStruct) invokeLetExpr() {
 
 			value, runInfo.err = convertReflectValueToType(value, item.Type())
 			if runInfo.err != nil {
-				runInfo.err = newStringError(expr, "type "+value.Type().String()+" cannot be assigned to type "+item.Type().String()+" for array index")
+				runInfo.err = newStringError(expr, "type "+value.Type().String()+" cannot be assigned to type "+item.Type().String()+" for slice index")
 				runInfo.rv = nilValue
 				return
 			}
@@ -260,31 +260,30 @@ func (runInfo *runInfoStruct) invokeLetExpr() {
 
 		// Slice && Array
 		case reflect.Slice, reflect.Array:
-			var beginIndex, endIndex int
-			if expr.Begin == nil {
-				beginIndex = 0
-			} else {
+			var beginIndex int
+			endIndex := item.Len()
+
+			if expr.Begin != nil {
 				runInfo.expr = expr.Begin
 				runInfo.invokeExpr()
 				if runInfo.err != nil {
 					return
 				}
-
 				beginIndex, runInfo.err = tryToInt(runInfo.rv)
 				if runInfo.err != nil {
 					runInfo.err = newStringError(expr, "index must be a number")
 					runInfo.rv = nilValue
 					return
 				}
-				if beginIndex < 0 || beginIndex > item.Len() {
+				// (0 <= low) <= high <= len(a)
+				if beginIndex < 0 {
 					runInfo.err = newStringError(expr, "index out of range")
 					runInfo.rv = nilValue
 					return
 				}
 			}
-			if expr.End == nil {
-				endIndex = item.Len()
-			} else {
+
+			if expr.End != nil {
 				runInfo.expr = expr.End
 				runInfo.invokeExpr()
 				if runInfo.err != nil {
@@ -296,18 +295,43 @@ func (runInfo *runInfoStruct) invokeLetExpr() {
 					runInfo.rv = nilValue
 					return
 				}
-				if endIndex < 0 || endIndex > item.Len() {
+				// 0 <= low <= (high <= len(a))
+				if endIndex > item.Len() {
 					runInfo.err = newStringError(expr, "index out of range")
 					runInfo.rv = nilValue
 					return
 				}
 			}
+
+			// 0 <= (low <= high) <= len(a)
 			if beginIndex > endIndex {
-				runInfo.err = newStringError(expr, "invalid slice index")
+				runInfo.err = newStringError(expr, "index out of range")
 				runInfo.rv = nilValue
 				return
 			}
-			item = item.Slice(beginIndex, endIndex)
+
+			sliceCap := item.Cap()
+			if expr.Cap != nil {
+				runInfo.expr = expr.Cap
+				runInfo.invokeExpr()
+				if runInfo.err != nil {
+					return
+				}
+				sliceCap, runInfo.err = tryToInt(runInfo.rv)
+				if runInfo.err != nil {
+					runInfo.err = newStringError(expr, "cap must be a number")
+					runInfo.rv = nilValue
+					return
+				}
+				//  0 <= low <= (high <= max <= cap(a))
+				if sliceCap < endIndex || sliceCap > item.Cap() {
+					runInfo.err = newStringError(expr, "cap out of range")
+					runInfo.rv = nilValue
+					return
+				}
+			}
+
+			item = item.Slice3(beginIndex, endIndex, sliceCap)
 
 			if !item.CanSet() {
 				runInfo.err = newStringError(expr, "slice cannot be assigned")

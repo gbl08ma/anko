@@ -30,39 +30,125 @@ func (runInfo *runInfoStruct) invokeExpr() {
 
 	// ArrayExpr
 	case *ast.ArrayExpr:
-		a := make([]interface{}, len(expr.Exprs))
+		if expr.TypeData == nil {
+			slice := make([]interface{}, len(expr.Exprs))
+			var i int
+			for i, runInfo.expr = range expr.Exprs {
+				runInfo.invokeExpr()
+				if runInfo.err != nil {
+					return
+				}
+				slice[i] = runInfo.rv.Interface()
+			}
+			runInfo.rv = reflect.ValueOf(slice)
+			return
+		}
+
+		t := makeType(runInfo, expr.TypeData)
+		if runInfo.err != nil {
+			runInfo.rv = nilValue
+			return
+		}
+		if t == nil {
+			runInfo.err = newStringError(expr, "cannot make type nil")
+			runInfo.rv = nilValue
+			return
+		}
+
+		slice := reflect.MakeSlice(t, len(expr.Exprs), len(expr.Exprs))
 		var i int
+		valueType := t.Elem()
 		for i, runInfo.expr = range expr.Exprs {
 			runInfo.invokeExpr()
 			if runInfo.err != nil {
 				return
 			}
-			a[i] = runInfo.rv.Interface()
+
+			runInfo.rv, runInfo.err = convertReflectValueToType(runInfo.rv, valueType)
+			if runInfo.err != nil {
+				runInfo.err = newStringError(expr, "cannot use type "+runInfo.rv.Type().String()+" as type "+valueType.String()+" as slice value")
+				runInfo.rv = nilValue
+				return
+			}
+
+			slice.Index(i).Set(runInfo.rv)
 		}
-		runInfo.rv = reflect.ValueOf(a)
+		runInfo.rv = slice
 
 	// MapExpr
 	case *ast.MapExpr:
-		var valueExpr ast.Expr
-		var key reflect.Value
-		m := make(map[interface{}]interface{}, len(expr.MapExpr))
-		// TODO: overhead of map is not needed for MapExpr, can turn into two slices
-		for runInfo.expr, valueExpr = range expr.MapExpr {
-			runInfo.invokeExpr()
-			if runInfo.err != nil {
-				return
-			}
-			key = runInfo.rv
+		if expr.TypeData == nil {
+			var i int
+			var key reflect.Value
+			m := make(map[interface{}]interface{}, len(expr.Keys))
+			for i, runInfo.expr = range expr.Keys {
+				runInfo.invokeExpr()
+				if runInfo.err != nil {
+					return
+				}
+				key = runInfo.rv
 
-			runInfo.expr = valueExpr
-			runInfo.invokeExpr()
-			if runInfo.err != nil {
-				return
-			}
+				runInfo.expr = expr.Values[i]
+				runInfo.invokeExpr()
+				if runInfo.err != nil {
+					return
+				}
 
-			m[key.Interface()] = runInfo.rv.Interface()
+				m[key.Interface()] = runInfo.rv.Interface()
+			}
+			runInfo.rv = reflect.ValueOf(m)
+			return
 		}
-		runInfo.rv = reflect.ValueOf(m)
+
+		t := makeType(runInfo, expr.TypeData)
+		if runInfo.err != nil {
+			runInfo.rv = nilValue
+			return
+		}
+		if t == nil {
+			runInfo.err = newStringError(expr, "cannot make type nil")
+			runInfo.rv = nilValue
+			return
+		}
+
+		runInfo.rv, runInfo.err = makeValue(t)
+		if runInfo.err != nil {
+			runInfo.rv = nilValue
+			return
+		}
+
+		var i int
+		var key reflect.Value
+		m := runInfo.rv
+		keyType := t.Key()
+		valueType := t.Elem()
+		for i, runInfo.expr = range expr.Keys {
+			runInfo.invokeExpr()
+			if runInfo.err != nil {
+				return
+			}
+			key, runInfo.err = convertReflectValueToType(runInfo.rv, keyType)
+			if runInfo.err != nil {
+				runInfo.err = newStringError(expr, "cannot use type "+key.Type().String()+" as type "+keyType.String()+" as map key")
+				runInfo.rv = nilValue
+				return
+			}
+
+			runInfo.expr = expr.Values[i]
+			runInfo.invokeExpr()
+			if runInfo.err != nil {
+				return
+			}
+			runInfo.rv, runInfo.err = convertReflectValueToType(runInfo.rv, valueType)
+			if runInfo.err != nil {
+				runInfo.err = newStringError(expr, "cannot use type "+runInfo.rv.Type().String()+" as type "+valueType.String()+" as map value")
+				runInfo.rv = nilValue
+				return
+			}
+
+			m.SetMapIndex(key, runInfo.rv)
+		}
+		runInfo.rv = m
 
 	// DerefExpr
 	case *ast.DerefExpr:
@@ -156,9 +242,9 @@ func (runInfo *runInfoStruct) invokeExpr() {
 			return
 		}
 
-		method, found := runInfo.rv.Type().MethodByName(expr.Name)
-		if found {
-			runInfo.rv = runInfo.rv.Method(method.Index)
+		value := runInfo.rv.MethodByName(expr.Name)
+		if value.IsValid() {
+			runInfo.rv = value
 			return
 		}
 
@@ -251,31 +337,30 @@ func (runInfo *runInfoStruct) invokeExpr() {
 
 		switch item.Kind() {
 		case reflect.String, reflect.Slice, reflect.Array:
-			var beginIndex, endIndex int
-			if expr.Begin == nil {
-				beginIndex = 0
-			} else {
+			var beginIndex int
+			endIndex := item.Len()
+
+			if expr.Begin != nil {
 				runInfo.expr = expr.Begin
 				runInfo.invokeExpr()
 				if runInfo.err != nil {
 					return
 				}
-
 				beginIndex, runInfo.err = tryToInt(runInfo.rv)
 				if runInfo.err != nil {
 					runInfo.err = newStringError(expr, "index must be a number")
 					runInfo.rv = nilValue
 					return
 				}
-				if beginIndex < 0 || beginIndex > item.Len() {
+				// (0 <= low) <= high <= len(a)
+				if beginIndex < 0 {
 					runInfo.err = newStringError(expr, "index out of range")
 					runInfo.rv = nilValue
 					return
 				}
 			}
-			if expr.End == nil {
-				endIndex = item.Len()
-			} else {
+
+			if expr.End != nil {
 				runInfo.expr = expr.End
 				runInfo.invokeExpr()
 				if runInfo.err != nil {
@@ -287,18 +372,54 @@ func (runInfo *runInfoStruct) invokeExpr() {
 					runInfo.rv = nilValue
 					return
 				}
-				if endIndex < 0 || endIndex > item.Len() {
+				// 0 <= low <= (high <= len(a))
+				if endIndex > item.Len() {
 					runInfo.err = newStringError(expr, "index out of range")
 					runInfo.rv = nilValue
 					return
 				}
 			}
+
+			// 0 <= (low <= high) <= len(a)
 			if beginIndex > endIndex {
-				runInfo.err = newStringError(expr, "invalid slice index")
+				runInfo.err = newStringError(expr, "index out of range")
 				runInfo.rv = nilValue
 				return
 			}
-			runInfo.rv = item.Slice(beginIndex, endIndex)
+
+			if item.Kind() == reflect.String {
+				if expr.Cap != nil {
+					runInfo.err = newStringError(expr, "type string does not support cap")
+					runInfo.rv = nilValue
+					return
+				}
+				runInfo.rv = item.Slice(beginIndex, endIndex)
+				return
+			}
+
+			sliceCap := item.Cap()
+			if expr.Cap != nil {
+				runInfo.expr = expr.Cap
+				runInfo.invokeExpr()
+				if runInfo.err != nil {
+					return
+				}
+				sliceCap, runInfo.err = tryToInt(runInfo.rv)
+				if runInfo.err != nil {
+					runInfo.err = newStringError(expr, "cap must be a number")
+					runInfo.rv = nilValue
+					return
+				}
+				//  0 <= low <= (high <= max <= cap(a))
+				if sliceCap < endIndex || sliceCap > item.Cap() {
+					runInfo.err = newStringError(expr, "cap out of range")
+					runInfo.rv = nilValue
+					return
+				}
+			}
+
+			runInfo.rv = item.Slice3(beginIndex, endIndex, sliceCap)
+
 		default:
 			runInfo.err = newStringError(expr, "type "+item.Kind().String()+" does not support slice operation")
 			runInfo.rv = nilValue
@@ -376,66 +497,61 @@ func (runInfo *runInfoStruct) invokeExpr() {
 			runInfo.rv = nilValue
 		}
 
-	// NewExpr
-	case *ast.NewExpr:
-		var t reflect.Type
-		t, runInfo.err = getTypeFromString(runInfo.env, expr.Type)
-		if runInfo.err != nil {
-			runInfo.rv = nilValue
-			return
-		}
-		if t == nil {
-			runInfo.err = newStringError(expr, "type cannot be nil for new")
-			runInfo.rv = nilValue
-			return
-		}
-		runInfo.rv = reflect.New(t)
-
 	// MakeExpr
 	case *ast.MakeExpr:
-		var t reflect.Type
-		t, runInfo.err = getTypeFromString(runInfo.env, expr.Type)
+		t := makeType(runInfo, expr.TypeData)
 		if runInfo.err != nil {
 			runInfo.rv = nilValue
 			return
 		}
 		if t == nil {
-			runInfo.err = newStringError(expr, "type cannot be nil for make")
+			runInfo.err = newStringError(expr, "cannot make type nil")
 			runInfo.rv = nilValue
 			return
 		}
 
-		for i := 1; i < expr.Dimensions; i++ {
-			t = reflect.SliceOf(t)
-		}
-		if expr.Dimensions < 1 {
-			runInfo.rv, runInfo.err = makeValue(t)
+		switch expr.TypeData.Kind {
+		case ast.TypeSlice:
+			aLen := 0
+			if expr.LenExpr != nil {
+				runInfo.expr = expr.LenExpr
+				runInfo.invokeExpr()
+				if runInfo.err != nil {
+					return
+				}
+				aLen = toInt(runInfo.rv)
+			}
+			cap := aLen
+			if expr.CapExpr != nil {
+				runInfo.expr = expr.CapExpr
+				runInfo.invokeExpr()
+				if runInfo.err != nil {
+					return
+				}
+				cap = toInt(runInfo.rv)
+			}
+			if aLen > cap {
+				runInfo.err = newStringError(expr, "make slice len > cap")
+				runInfo.rv = nilValue
+				return
+			}
+			runInfo.rv = reflect.MakeSlice(t, aLen, cap)
+			return
+		case ast.TypeChan:
+			aLen := 0
+			if expr.LenExpr != nil {
+				runInfo.expr = expr.LenExpr
+				runInfo.invokeExpr()
+				if runInfo.err != nil {
+					return
+				}
+				aLen = toInt(runInfo.rv)
+			}
+			runInfo.rv = reflect.MakeChan(t, aLen)
 			return
 		}
 
-		var alen int
-		if expr.LenExpr != nil {
-			runInfo.expr = expr.LenExpr
-			runInfo.invokeExpr()
-			if runInfo.err != nil {
-				return
-			}
-			alen = toInt(runInfo.rv)
-		}
-
-		var acap int
-		if expr.CapExpr != nil {
-			runInfo.expr = expr.CapExpr
-			runInfo.invokeExpr()
-			if runInfo.err != nil {
-				return
-			}
-			acap = toInt(runInfo.rv)
-		} else {
-			acap = alen
-		}
-
-		runInfo.rv = reflect.MakeSlice(reflect.SliceOf(t), alen, acap)
+		runInfo.rv, runInfo.err = makeValue(t)
 
 	// MakeTypeExpr
 	case *ast.MakeTypeExpr:
@@ -450,38 +566,15 @@ func (runInfo *runInfoStruct) invokeExpr() {
 
 		runInfo.rv = reflect.ValueOf(runInfo.rv.Type())
 
-	// MakeChanExpr
-	case *ast.MakeChanExpr:
-		var t reflect.Type
-		t, runInfo.err = getTypeFromString(runInfo.env, expr.Type)
-		if runInfo.err != nil {
-			runInfo.rv = nilValue
-			return
-		}
-		if t == nil {
-			runInfo.err = newStringError(expr, "type cannot be nil for make chan")
-			runInfo.rv = nilValue
-			return
-		}
-
-		var size int
-		if expr.SizeExpr != nil {
-			runInfo.expr = expr.SizeExpr
-			runInfo.invokeExpr()
-			if runInfo.err != nil {
-				return
-			}
-			size = toInt(runInfo.rv)
-		}
-
-		runInfo.rv = reflect.MakeChan(reflect.ChanOf(reflect.BothDir, t), size)
-
 	// ChanExpr
 	case *ast.ChanExpr:
 		runInfo.expr = expr.RHS
 		runInfo.invokeExpr()
 		if runInfo.err != nil {
 			return
+		}
+		if runInfo.rv.Kind() == reflect.Interface && !runInfo.rv.IsNil() {
+			runInfo.rv = runInfo.rv.Elem()
 		}
 		rhs := runInfo.rv
 
@@ -494,6 +587,10 @@ func (runInfo *runInfoStruct) invokeExpr() {
 				}
 				runInfo.err = nil
 			}
+		}
+
+		if runInfo.rv.Kind() == reflect.Interface && !runInfo.rv.IsNil() {
+			runInfo.rv = runInfo.rv.Elem()
 		}
 
 		if expr.LHS == nil || runInfo.rv.Kind() != reflect.Chan {
@@ -548,6 +645,7 @@ func (runInfo *runInfoStruct) invokeExpr() {
 			Chan: runInfo.rv,
 			Send: rhs,
 		}}
+		// capture panics if not in debug mode
 		defer func() {
 			if os.Getenv("ANKO_DEBUG") == "" {
 				if recoverResult := recover(); recoverResult != nil {

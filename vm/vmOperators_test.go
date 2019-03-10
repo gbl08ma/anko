@@ -27,6 +27,14 @@ func TestBasicOperators(t *testing.T) {
 		{Script: `2.1 * 2.0`, RunOutput: float64(4.2)},
 		{Script: `6.5 / 2.0`, RunOutput: float64(3.25)},
 
+		{Script: `2-1`, RunOutput: int64(1)},
+		{Script: `2 -1`, RunOutput: int64(1)},
+		{Script: `2- 1`, RunOutput: int64(1)},
+		{Script: `2 - -1`, RunOutput: int64(3)},
+		{Script: `2- -1`, RunOutput: int64(3)},
+		{Script: `2 - - 1`, RunOutput: int64(3)},
+		{Script: `2- - 1`, RunOutput: int64(3)},
+
 		{Script: `a + b`, Input: map[string]interface{}{"a": int64(2), "b": int64(1)}, RunOutput: int64(3)},
 		{Script: `a - b`, Input: map[string]interface{}{"a": int64(2), "b": int64(1)}, RunOutput: int64(1)},
 		{Script: `a * b`, Input: map[string]interface{}{"a": int64(2), "b": int64(1)}, RunOutput: int64(2)},
@@ -120,9 +128,6 @@ func TestBasicOperators(t *testing.T) {
 		{Script: `a -= 1`, Input: map[string]interface{}{"a": 2.1}, RunOutput: float64(1.1), Output: map[string]interface{}{"a": float64(1.1)}},
 		{Script: `a *= 2`, Input: map[string]interface{}{"a": 2.1}, RunOutput: float64(4.2), Output: map[string]interface{}{"a": float64(4.2)}},
 		{Script: `a /= 2`, Input: map[string]interface{}{"a": 6.5}, RunOutput: float64(3.25), Output: map[string]interface{}{"a": float64(3.25)}},
-
-		{Script: `a ** 3`, Input: map[string]interface{}{"a": int64(2)}, RunOutput: int64(8), Output: map[string]interface{}{"a": int64(2)}},
-		{Script: `a ** 3`, Input: map[string]interface{}{"a": float64(2)}, RunOutput: float64(8), Output: map[string]interface{}{"a": float64(2)}},
 
 		{Script: `a &= 1`, Input: map[string]interface{}{"a": int64(2)}, RunOutput: int64(0), Output: map[string]interface{}{"a": int64(0)}},
 		{Script: `a &= 2`, Input: map[string]interface{}{"a": int64(2)}, RunOutput: int64(2), Output: map[string]interface{}{"a": int64(2)}},
@@ -489,7 +494,7 @@ func TestNilCoalescingOperator(t *testing.T) {
 		{Script: `{} ?? 1`, RunOutput: map[interface{}]interface{}{}},
 
 		// test nil array and map
-		{Script: `a ?? 5`, Input: map[string]interface{}{"a": testArrayEmpty}, RunOutput: int64(5), Output: map[string]interface{}{"a": testArrayEmpty}},
+		{Script: `a ?? 5`, Input: map[string]interface{}{"a": testSliceEmpty}, RunOutput: int64(5), Output: map[string]interface{}{"a": testSliceEmpty}},
 		{Script: `a ?? 6`, Input: map[string]interface{}{"a": testMapEmpty}, RunOutput: int64(6), Output: map[string]interface{}{"a": testMapEmpty}},
 	}
 	testlib.Run(t, tests, nil)

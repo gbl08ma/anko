@@ -17,7 +17,7 @@ import (
 	"github.com/gbl08ma/anko/vm"
 )
 
-const version = "0.0.8"
+const version = "0.1.1"
 
 var (
 	flagExecute string

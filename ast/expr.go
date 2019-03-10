@@ -29,13 +29,16 @@ type LiteralExpr struct {
 // ArrayExpr provide Array expression.
 type ArrayExpr struct {
 	ExprImpl
-	Exprs []Expr
+	Exprs    []Expr
+	TypeData *TypeStruct
 }
 
 // MapExpr provide Map expression.
 type MapExpr struct {
 	ExprImpl
-	MapExpr map[Expr]Expr
+	Keys     []Expr
+	Values   []Expr
+	TypeData *TypeStruct
 }
 
 // IdentExpr provide identity expression.
@@ -123,6 +126,7 @@ type SliceExpr struct {
 	Item  Expr
 	Begin Expr
 	End   Expr
+	Cap   Expr
 }
 
 // FuncExpr provide function expression.
@@ -148,31 +152,12 @@ type ChanExpr struct {
 	RHS Expr
 }
 
-// NewExpr provide expression to make new instance.
-type NewExpr struct {
-	ExprImpl
-	Type string
-}
-
-// MakeChanExpr provide expression to make chan instance.
-type MakeChanExpr struct {
-	ExprImpl
-	Type     string
-	SizeExpr Expr
-}
-
-// ArrayCount is used in MakeExpr to provide Dimensions
-type ArrayCount struct {
-	Count int
-}
-
 // MakeExpr provide expression to make instance.
 type MakeExpr struct {
 	ExprImpl
-	Dimensions int
-	Type       string
-	LenExpr    Expr
-	CapExpr    Expr
+	TypeData *TypeStruct
+	LenExpr  Expr
+	CapExpr  Expr
 }
 
 // MakeTypeExpr provide expression to make type.

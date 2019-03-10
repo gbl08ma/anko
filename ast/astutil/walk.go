@@ -179,8 +179,11 @@ func walkExpr(expr ast.Expr, f WalkFunc) error {
 	case *ast.ArrayExpr:
 		return walkExprs(expr.Exprs, f)
 	case *ast.MapExpr:
-		for _, expr := range expr.MapExpr {
-			if err := walkExpr(expr, f); err != nil {
+		for i := range expr.Keys {
+			if err := walkExpr(expr.Keys[i], f); err != nil {
+				return err
+			}
+			if err := walkExpr(expr.Values[i], f); err != nil {
 				return err
 			}
 		}
@@ -199,7 +202,6 @@ func walkExpr(expr ast.Expr, f WalkFunc) error {
 			return err
 		}
 		return walkExprs(expr.RHSS, f)
-	case *ast.NewExpr:
 	case *ast.AnonCallExpr:
 		if err := walkExpr(expr.Expr, f); err != nil {
 			return err
@@ -215,8 +217,6 @@ func walkExpr(expr ast.Expr, f WalkFunc) error {
 			return err
 		}
 		return walkExpr(expr.RHS, f)
-	case *ast.MakeChanExpr:
-		return walkExpr(expr.SizeExpr, f)
 	case *ast.MakeExpr:
 		if err := walkExpr(expr.LenExpr, f); err != nil {
 			return err
