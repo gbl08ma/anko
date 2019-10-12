@@ -4,12 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
 
 	"github.com/gbl08ma/anko/ast"
-	"github.com/gbl08ma/anko/internal/corelib"
+	"github.com/gbl08ma/anko/env"
 )
+
+// Options provides options to run VM with
+type Options struct {
+	Debug bool // run in Debug mode
+}
 
 type (
 	// Error is a VM run error.
@@ -22,7 +26,8 @@ type (
 	runInfoStruct struct {
 		// incoming
 		ctx      context.Context
-		env      *Env
+		env      *env.Env
+		options  *Options
 		stmt     ast.Stmt
 		expr     ast.Expr
 		operator ast.Operator
@@ -36,6 +41,8 @@ type (
 var (
 	nilType            = reflect.TypeOf(nil)
 	stringType         = reflect.TypeOf("a")
+	byteType           = reflect.TypeOf(byte('a'))
+	runeType           = reflect.TypeOf('a')
 	interfaceType      = reflect.ValueOf([]interface{}{int64(1)}).Index(0).Type()
 	interfaceSliceType = reflect.TypeOf([]interface{}{})
 	reflectValueType   = reflect.TypeOf(reflect.Value{})
@@ -49,6 +56,8 @@ var (
 	zeroValue                 = reflect.Value{}
 	reflectValueNilValue      = reflect.ValueOf(nilValue)
 	reflectValueErrorNilValue = reflect.ValueOf(reflect.New(errorType).Elem())
+
+	errInvalidTypeConversion = fmt.Errorf("invalid type conversion")
 
 	// ErrBreak when there is an unexpected break statement
 	ErrBreak = errors.New("unexpected break statement")
@@ -311,7 +320,7 @@ func makeType(runInfo *runInfoStruct, typeStruct *ast.TypeStruct) reflect.Type {
 		}
 		// capture panics if not in debug mode
 		defer func() {
-			if os.Getenv("ANKO_DEBUG") == "" {
+			if !runInfo.options.Debug {
 				if recoverResult := recover(); recoverResult != nil {
 					runInfo.err = fmt.Errorf("%v", recoverResult)
 					t = nil
@@ -341,17 +350,14 @@ func makeType(runInfo *runInfoStruct, typeStruct *ast.TypeStruct) reflect.Type {
 }
 
 func getTypeFromEnv(runInfo *runInfoStruct, typeStruct *ast.TypeStruct) reflect.Type {
-	env := runInfo.env
-	for _, envString := range typeStruct.Env {
-		e, found := env.env[envString]
-		if !found {
-			runInfo.err = fmt.Errorf("no namespace called: %v", envString)
-			return nil
-		}
-		env = e.Interface().(*Env)
+	var e *env.Env
+	e, runInfo.err = runInfo.env.GetEnvFromPath(typeStruct.Env)
+	if runInfo.err != nil {
+		return nil
 	}
+
 	var t reflect.Type
-	t, runInfo.err = env.Type(typeStruct.Name)
+	t, runInfo.err = e.Type(typeStruct.Name)
 	return t
 }
 
@@ -377,6 +383,9 @@ func makeValue(t reflect.Type) (reflect.Value, error) {
 	case reflect.Struct:
 		structV := reflect.New(t).Elem()
 		for i := 0; i < structV.NumField(); i++ {
+			if structV.Field(i).Kind() == reflect.Ptr {
+				continue
+			}
 			v, err := makeValue(structV.Field(i).Type())
 			if err != nil {
 				return nilValue, err
@@ -388,12 +397,6 @@ func makeValue(t reflect.Type) (reflect.Value, error) {
 		return structV, nil
 	}
 	return reflect.New(t).Elem(), nil
-}
-
-// ValueEqual checks the values and returns true if equal
-// If passed function, does extra checks otherwise just doing reflect.DeepEqual
-func ValueEqual(v1 interface{}, v2 interface{}) bool {
-	return corelib.ValueEqual(v1, v2)
 }
 
 // precedenceOfKinds returns the greater of two kinds
